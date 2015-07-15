@@ -22,6 +22,7 @@ import struct
 import threading
 import ctypes
 import ctypes.util
+import time
 from functools import reduce
 from ctypes import c_int, c_char_p, c_uint32
 from watchdog.utils import has_attribute
@@ -62,6 +63,9 @@ inotify_rm_watch = ctypes.CFUNCTYPE(c_int, c_int, c_uint32, use_errno=True)(
 
 inotify_init = ctypes.CFUNCTYPE(c_int, use_errno=True)(
     ("inotify_init", libc))
+
+inotify_init1 = ctypes.CFUNCTYPE(c_int, c_int, use_errno=True)(
+    ("inotify_init1", libc))
 
 
 class InotifyConstants(object):
@@ -114,8 +118,8 @@ class InotifyConstants(object):
         ])
 
     # Flags for ``inotify_init1``
-    IN_CLOEXEC = 0x02000000
-    IN_NONBLOCK = 0x00004000
+    IN_CLOEXEC = 02000000
+    IN_NONBLOCK = 00004000
 
 
 # Watchdog's API cares only about these events.
@@ -171,7 +175,7 @@ class Inotify(object):
 
     def __init__(self, path, recursive=False, event_mask=WATCHDOG_ALL_EVENTS):
         # The file descriptor associated with the inotify instance.
-        inotify_fd = inotify_init()
+        inotify_fd = inotify_init1(IN_NONBLOCK)
         if inotify_fd == -1:
             Inotify._raise_error()
         self._inotify_fd = inotify_fd
@@ -186,6 +190,7 @@ class Inotify(object):
         self._is_recursive = recursive
         self._add_dir_watch(path, recursive, event_mask)
         self._moved_from_events = dict()
+        self._isRunning = True
 
     @property
     def event_mask(self):
@@ -240,6 +245,9 @@ class Inotify(object):
         with self._lock:
             self._add_watch(path, self._event_mask)
 
+    def stop(self):
+        self._isRunning = False
+
     def remove_watch(self, path):
         """
         Removes a watch for the given path.
@@ -291,13 +299,19 @@ class Inotify(object):
             return events
 
         event_buffer = None
-        while True:
+        while self._isRunning:
             try:
                 event_buffer = os.read(self._inotify_fd, event_buffer_size)
             except OSError as e:
                 if e.errno == errno.EINTR:
                     continue
+            if event_buffer == None:
+                time.sleep(1)
+                continue
             break
+
+        if event_buffer == None:
+            return []
 
         with self._lock:
             event_list = []

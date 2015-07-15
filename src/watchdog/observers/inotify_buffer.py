@@ -47,6 +47,7 @@ class InotifyBuffer(BaseThread):
         self._queue.close()
 
     def close(self):
+        self._inotify.stop()
         self.stop()
         self.join()
 
